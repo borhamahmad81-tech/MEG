@@ -37,6 +37,15 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Pre-flight check (list files, test import)
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        run: |
+          Write-Host "----- Files in project dir -----"
+          Get-ChildItem -Force | Format-Table Name, Length, Attributes -AutoSize
+          Write-Host "----- Testing: python -c 'import gui_app' -----"
+          python -c "import gui_app; print('gui_app imported OK from:', gui_app.__file__)"
+
       - name: Build EXE
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
