@@ -1,0 +1,118 @@
+{
+  "_readme": "Confirmed against real saved MEG (audits.megsupporttools.com) pages: the dashboard list page, a Closed record page, and an open Analysis/Investigation record page (2026-07-04). type 'id' = Selenium By.ID (most reliable, used wherever possible). type 'css'/'xpath' still supported.",
+  "record_rows": {
+    "type": "css",
+    "value": "div.widget-answertablewidget table.table-striped tbody tr",
+    "_status": "CONFIRMED - table has no id, but this class combo is unique on the dashboard page"
+  },
+  "record_id_cell": {
+    "type": "css",
+    "value": "td:nth-child(1)",
+    "_status": "CONFIRMED - column 1 = ID"
+  },
+  "event_description_cell": {
+    "type": "css",
+    "value": "td:nth-child(6)",
+    "_status": "CONFIRMED - column 6 = 'Please select the safety event description', used for early code-filtering before opening a record"
+  },
+  "harm_level_cell": {
+    "type": "css",
+    "value": "td:nth-child(7)",
+    "_status": "CONFIRMED - column 7 = 'Please confirm the level of harm'"
+  },
+  "open_record_link": {
+    "type": "css",
+    "value": "a.answerTableLink",
+    "_status": "CONFIRMED (pencil/edit icon) - not used by default since the app navigates by direct URL, kept as a fallback"
+  },
+  "safety_event_description_field": {
+    "type": "id",
+    "value": "id_aor_code",
+    "_status": "CONFIRMED - a bootstrap-multiselect-wrapped <select>; the app only reads this, never sets it"
+  },
+  "free_text_description_field": {
+    "type": "id",
+    "value": "id_detailed_aor_description",
+    "_status": "CONFIRMED - read-only <span data-value=...> even on open records; only read, never filled"
+  },
+  "harm_level_field": {
+    "type": "id",
+    "value": "id_min_level_of_harm",
+    "_status": "CONFIRMED (record page copy of the same value shown in harm_level_cell)"
+  },
+  "status_field": {
+    "type": "id",
+    "value": "id_status",
+    "_status": "CONFIRMED"
+  },
+  "analysis_tool_field": {
+    "type": "id",
+    "value": "id_root_cause_analysis",
+    "_status": "CONFIRMED - stays a hidden span even on an open Analysis/Investigation record, so set_analysis_tool() is a safe no-op and isn't actually required"
+  },
+  "define_problem_field": {
+    "type": "id",
+    "value": "id_define_the_problem",
+    "_status": "CONFIRMED - real <textarea> on the open record"
+  },
+  "why1_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_1",
+    "_status": "CONFIRMED - real <textarea>"
+  },
+  "why2_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_2",
+    "_status": "CONFIRMED - real <textarea>"
+  },
+  "why3_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_3",
+    "_status": "CONFIRMED - real <textarea>"
+  },
+  "why4_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_4",
+    "_status": "CONFIRMED - real <textarea>"
+  },
+  "why5_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_5",
+    "_status": "CONFIRMED - real <textarea>"
+  },
+  "safety_event_owner_field": {
+    "type": "id",
+    "value": "id_aor_owner",
+    "_status": "CONFIRMED - Select2 remote-search widget (not a plain select); see browser_controller.ensure_safety_event_owner()"
+  },
+  "save_button": {
+    "type": "css",
+    "value": "#observation-form button.btn-success[type='submit']",
+    "_status": "CONFIRMED on the open Analysis/Investigation record"
+  },
+  "why6_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_6",
+    "_status": "UNCONFIRMED - extrapolated from the confirmed why1-5 naming pattern and the root-cause radio groups which do go up to _10; please confirm if you ever need more than 5 causes"
+  },
+  "why7_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_7",
+    "_status": "UNCONFIRMED - extrapolated from the confirmed why1-5 naming pattern and the root-cause radio groups which do go up to _10; please confirm if you ever need more than 5 causes"
+  },
+  "why8_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_8",
+    "_status": "UNCONFIRMED - extrapolated from the confirmed why1-5 naming pattern and the root-cause radio groups which do go up to _10; please confirm if you ever need more than 5 causes"
+  },
+  "why9_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_9",
+    "_status": "UNCONFIRMED - extrapolated from the confirmed why1-5 naming pattern and the root-cause radio groups which do go up to _10; please confirm if you ever need more than 5 causes"
+  },
+  "why10_field": {
+    "type": "id",
+    "value": "id_why_did_this_problem_occur_why_10",
+    "_status": "UNCONFIRMED - extrapolated from the confirmed why1-5 naming pattern and the root-cause radio groups which do go up to _10; please confirm if you ever need more than 5 causes"
+  }
+}
