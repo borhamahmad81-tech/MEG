@@ -43,9 +43,27 @@ jobs:
           pyinstaller --noconfirm --onefile --windowed --name SafetyEventAssistant `
             --collect-all customtkinter `
             --collect-all selenium `
+            --collect-all pandas `
             --add-data "config;config" `
             --add-data "Master_Rules_Matrix_Final.xlsx;." `
             main.py
+
+      - name: Show PyInstaller missing-modules report
+        if: always()
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        run: |
+          $warnFile = "build\SafetyEventAssistant\warn-SafetyEventAssistant.txt"
+          if (Test-Path $warnFile) {
+            Write-Host "----- warn-SafetyEventAssistant.txt -----"
+            Get-Content $warnFile
+          } else {
+            Write-Host "Warn file not found at $warnFile"
+          }
+          if (Test-Path "dist\SafetyEventAssistant.exe") {
+            $size = (Get-Item "dist\SafetyEventAssistant.exe").Length / 1MB
+            Write-Host "EXE size: $size MB"
+          }
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
