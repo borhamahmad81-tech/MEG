@@ -37,15 +37,6 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Pre-flight check (list files, test import)
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: pwsh
-        run: |
-          Write-Host "----- Files in project dir -----"
-          Get-ChildItem -Force | Format-Table Name, Length, Attributes -AutoSize
-          Write-Host "----- Testing: python -c 'import gui_app' -----"
-          python -c "import gui_app; print('gui_app imported OK from:', gui_app.__file__)"
-
       - name: Build EXE
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
@@ -53,29 +44,26 @@ jobs:
             --collect-all customtkinter `
             --collect-all selenium `
             --collect-all pandas `
-            --add-data "config;config" `
-            --add-data "Master_Rules_Matrix_Final.xlsx;." `
             main.py
 
-      - name: Show PyInstaller missing-modules report
-        if: always()
+      - name: Assemble release folder (exe + editable data files together)
         working-directory: ${{ env.PROJECT_DIR }}
         shell: pwsh
         run: |
-          $warnFile = "build\SafetyEventAssistant\warn-SafetyEventAssistant.txt"
-          if (Test-Path $warnFile) {
-            Write-Host "----- warn-SafetyEventAssistant.txt -----"
-            Get-Content $warnFile
-          } else {
-            Write-Host "Warn file not found at $warnFile"
-          }
-          if (Test-Path "dist\SafetyEventAssistant.exe") {
-            $size = (Get-Item "dist\SafetyEventAssistant.exe").Length / 1MB
-            Write-Host "EXE size: $size MB"
-          }
+          $release = "release\SafetyEventAssistant"
+          New-Item -ItemType Directory -Force -Path $release | Out-Null
+          Copy-Item "dist\SafetyEventAssistant.exe" $release
+          Copy-Item "Master_Rules_Matrix_Final.xlsx" $release -ErrorAction SilentlyContinue
+          Copy-Item "bulk_upload_template.xlsx" $release -ErrorAction SilentlyContinue
+          Copy-Item "config" "$release\config" -Recurse -ErrorAction SilentlyContinue
+          Copy-Item "launch_chrome_debug.bat" $release -ErrorAction SilentlyContinue
+          Copy-Item "launch_edge_debug.bat" $release -ErrorAction SilentlyContinue
+          Copy-Item "README.md" $release -ErrorAction SilentlyContinue
+          Write-Host "----- Release folder contents -----"
+          Get-ChildItem -Recurse $release | Format-Table FullName, Length
 
-      - name: Upload EXE artifact
+      - name: Upload release folder artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SafetyEventAssistant-windows-exe
-          path: ${{ env.PROJECT_DIR }}\dist\SafetyEventAssistant.exe
+          name: SafetyEventAssistant-windows
+          path: ${{ env.PROJECT_DIR }}\release\SafetyEventAssistant
