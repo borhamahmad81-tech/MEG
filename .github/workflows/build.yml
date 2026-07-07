@@ -30,6 +30,14 @@ jobs:
           Write-Host "Found main.py in: $projectDir"
           echo "PROJECT_DIR=$projectDir" >> $env:GITHUB_ENV
 
+      - name: Fast syntax check (catches errors in seconds, before install/build)
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: pwsh
+        run: |
+          python -m py_compile main.py gui_app.py automation_worker.py rules_engine.py `
+            browser_controller.py bulk_mode.py deferred_queue.py settings_manager.py
+          Write-Host "All files compiled cleanly on Python 3.11."
+
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
