@@ -530,11 +530,11 @@ class BrowserController:
 
     def set_radio_group(self, field_name: str, value: str, timeout=None):
         timeout = timeout if timeout is not None else self.default_timeout
-        """Clicks the radio input in group `field_name` whose value matches
-        `value` (case-insensitive)."""
-        xpath = (
-            f"//input[@type='radio' and @name='{field_name}']"
-        )
+        """Selects the radio in group `field_name` whose value matches
+        `value` (case-insensitive) by clicking its wrapping <label> -- the
+        same thing a human clicks -- which fires the events the site's
+        conditional-logic JS listens for."""
+        xpath = f"//input[@type='radio' and @name='{field_name}']"
         try:
             radios = WebDriverWait(self.driver, timeout).until(
                 lambda d: d.find_elements(By.XPATH, xpath) or False
@@ -545,29 +545,49 @@ class BrowserController:
 
         for radio in radios:
             radio_value = (radio.get_attribute("value") or "").strip()
-            if radio_value.lower() == value.strip().lower():
-                # Radios are often visually replaced by styled labels, so a
-                # plain click can miss -- fall back to JS click if needed.
-                try:
-                    radio.click()
-                except Exception:
-                    self.driver.execute_script("arguments[0].click();", radio)
-                # The site's conditional-logic JS reveals dependent sections
-                # (e.g. Root Cause Analysis, Closing) only when it hears the
-                # right DOM events. A programmatic click doesn't always emit
-                # the same events jQuery is bound to, so fire them explicitly.
-                try:
-                    self.driver.execute_script(
-                        "arguments[0].checked = true;"
-                        "arguments[0].dispatchEvent(new Event('click', {bubbles:true}));"
-                        "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));"
-                        "arguments[0].dispatchEvent(new Event('input', {bubbles:true}));",
-                        radio,
-                    )
-                except Exception:
-                    pass
-                time.sleep(0.15)  # brief settle for the conditional-logic JS
-                return True
+            if radio_value.lower() != value.strip().lower():
+                continue
+
+            # The radio input itself is often visually hidden (a styled
+            # <label> is shown instead). Clicking the label is what a human
+            # does and fires the correct native events. Prefer the wrapping
+            # or associated label; fall back to the input.
+            target = radio
+            try:
+                radio_id = radio.get_attribute("id")
+                if radio_id:
+                    labels = self.driver.find_elements(By.CSS_SELECTOR, f"label[for='{radio_id}']")
+                    if labels:
+                        target = labels[0]
+                else:
+                    parent = radio.find_element(By.XPATH, "./ancestor::label[1]")
+                    if parent:
+                        target = parent
+            except Exception:
+                pass
+
+            try:
+                target.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", target)
+
+            time.sleep(0.2)  # brief settle for the conditional-logic JS
+            # Ensure the input is checked and fire BOTH native and jQuery
+            # change events -- this site's conditional-logic (show/hide of
+            # dependent questions) is jQuery-bound, and a label click alone
+            # doesn't always run those handlers.
+            try:
+                self.driver.execute_script(
+                    "var el = arguments[0];"
+                    "el.checked = true;"
+                    "el.dispatchEvent(new Event('change', {bubbles:true}));"
+                    "if (window.jQuery) { window.jQuery(el).trigger('change'); window.jQuery(el).trigger('click'); }",
+                    radio,
+                )
+            except Exception:
+                pass
+            time.sleep(0.3)  # let the reveal logic run
+            return True
 
         self.logger(f"No option '{value}' found in radio group '{field_name}'.", "warn")
         return False
