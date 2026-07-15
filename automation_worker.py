@@ -302,22 +302,40 @@ class AutomationWorker(threading.Thread):
     def _apply_fields(self, define_text, causes):
         """Fills the record's fields on the live page WITHOUT saving. Used by
         both normal mode (immediately followed by Save) and Test Mode (where
-        the user reviews the filled page before approving the Save)."""
-        # Clinic Management Approval section (same single-page form).
+        the user reviews the filled page before approving the Save).
+
+        The page reveals fields in a strict dependency chain (confirmed from
+        the page's own condition-data config):
+          is_the_information_complete = Yes  -> reveals do_you_accept_the_aor
+          do_you_accept_the_aor       = Yes  -> reveals Analysis & Investigation
+                                                (Root Cause + Launch Analysis Tool)
+          launch_analysis_tool        = 5 Whys -> reveals Define the problem / Why
+        So each step must WAIT for the next field to actually appear before
+        continuing, otherwise we act on fields that aren't active yet.
+        """
+        # --- Clinic Management Approval section ---
         self.browser.set_code_correct("Yes")
         self.browser.set_information_complete("Yes")
+
+        # Wait for "Do you approve the safety event?" to appear, then set it.
+        self.browser.wait_for_radio_group_present("do_you_accept_the_aor", timeout=3)
         self.browser.set_approve_safety_event("Yes")
+
         self.browser.set_requires_escalation("No")
         self.browser.ensure_safety_event_owner(self.settings.get("safety_event_owner_name", "Ahmed Mohamed, Specialist"))
 
-        # "Do you approve the safety event?" = Yes (set above) is what the
-        # site's own JS uses to naturally reveal the Root Cause Analysis
-        # section (confirmed via the page's embedded condition-data config).
-        # Give that a real chance to happen first; only force it via a CSS
-        # override if it hasn't shown up naturally within the wait window.
-        if not self.browser.wait_for_element_visible("id_root_cause_analysis", timeout=8):
+        # Approving reveals the Analysis & Investigation section, whose first
+        # control is the Launch Analysis Tool radio. Wait for it to appear
+        # (fall back to a CSS force-reveal only if the site's JS didn't do it).
+        if not self.browser.wait_for_radio_group_present("launch_analysis_tool", timeout=3):
             self.browser.force_element_visible("id_root_cause_analysis")
+            self.browser.wait_for_radio_group_present("launch_analysis_tool", timeout=3)
+
         self.browser.set_launch_analysis_tool(self.settings.get("analysis_tool_name", "5 Whys"))
+
+        # Choosing "5 Whys" reveals Define the problem + Why boxes. Wait for
+        # the Define box to actually be present before typing into it.
+        self.browser.wait_for_field_present("define_problem_field", timeout=3)
         self.browser.fill_define_problem(define_text)
 
         if not causes:
@@ -335,8 +353,14 @@ class AutomationWorker(threading.Thread):
             # requested cause, which finalizes analysis and reveals Closing.
             self.browser.set_analysis_completed("Yes" if is_last else "No")
 
-        # Closing section (revealed by the final "Yes" above).
+        # Closing section (revealed by the final "Yes" above). We must wait
+        # for the "Are further actions required?" field to actually appear
+        # before answering it -- otherwise the answer lands on a not-yet-
+        # active field, leaving it effectively unanswered, which per the
+        # site's own status logic keeps the record stuck in
+        # "Analysis / Investigation" instead of moving it to "Closed".
         # Lessons Learned is intentionally left untouched.
+        self.browser.wait_for_radio_group_present("are_further_actions_required", timeout=3)
         self.browser.set_further_actions_required("No")
 
     # ------------------------------------------------------------------ #

@@ -502,6 +502,32 @@ class BrowserController:
     # screen belongs to a different role/stage), but available for when it
     # is needed.
     # ------------------------------------------------------------------ #
+    def wait_for_field_present(self, key, timeout=10):
+        """Waits until the configured field `key` exists AND is displayed."""
+        sel = self.selectors.get(key)
+        if not sel:
+            return False
+        try:
+            return WebDriverWait(self.driver, timeout).until(
+                lambda d: any(e.is_displayed() for e in d.find_elements(self._by(sel), sel["value"])) or False
+            )
+        except TimeoutException:
+            self.logger(f"Field '{key}' did not appear within {timeout}s.", "warn")
+            return False
+
+    def wait_for_radio_group_present(self, field_name: str, timeout=10):
+        """Waits until at least one radio input for this field group exists
+        AND is displayed -- used before answering a conditionally-revealed
+        question so we don't set it while it's still hidden."""
+        xpath = f"//input[@type='radio' and @name='{field_name}']"
+        try:
+            return WebDriverWait(self.driver, timeout).until(
+                lambda d: any(r.is_displayed() for r in d.find_elements(By.XPATH, xpath)) or False
+            )
+        except TimeoutException:
+            self.logger(f"Radio group '{field_name}' did not appear within {timeout}s.", "warn")
+            return False
+
     def set_radio_group(self, field_name: str, value: str, timeout=None):
         timeout = timeout if timeout is not None else self.default_timeout
         """Clicks the radio input in group `field_name` whose value matches
@@ -526,6 +552,21 @@ class BrowserController:
                     radio.click()
                 except Exception:
                     self.driver.execute_script("arguments[0].click();", radio)
+                # The site's conditional-logic JS reveals dependent sections
+                # (e.g. Root Cause Analysis, Closing) only when it hears the
+                # right DOM events. A programmatic click doesn't always emit
+                # the same events jQuery is bound to, so fire them explicitly.
+                try:
+                    self.driver.execute_script(
+                        "arguments[0].checked = true;"
+                        "arguments[0].dispatchEvent(new Event('click', {bubbles:true}));"
+                        "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));"
+                        "arguments[0].dispatchEvent(new Event('input', {bubbles:true}));",
+                        radio,
+                    )
+                except Exception:
+                    pass
+                time.sleep(0.15)  # brief settle for the conditional-logic JS
                 return True
 
         self.logger(f"No option '{value}' found in radio group '{field_name}'.", "warn")
