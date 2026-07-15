@@ -153,10 +153,27 @@ class AutomationWorker(threading.Thread):
             if self._check_pause_stop():
                 return
 
-            try:
-                rows = self.browser.get_record_rows()
-            except Exception as exc:
-                self.log(f"Could not read the records table: {exc}", "error")
+            rows = None
+            for read_attempt in range(4):
+                if self._check_pause_stop():
+                    return
+                try:
+                    rows = self.browser.get_record_rows()
+                    break
+                except Exception as exc:
+                    msg = str(exc).strip().splitlines()[0] if str(exc).strip() else "(blank error)"
+                    self.log(
+                        f"Reading records table failed (attempt {read_attempt + 1}/4): {msg} -- retrying...",
+                        "warn",
+                    )
+                    time.sleep(2)
+            if rows is None:
+                self.log(
+                    "Could not read the records table after several attempts. "
+                    "Make sure the debug browser is on the dashboard with rows visible, "
+                    "then try again.",
+                    "error",
+                )
                 return
 
             if not first_scan_logged:
