@@ -258,40 +258,44 @@ class BrowserController:
     # ------------------------------------------------------------------ #
     def get_record_rows(self, timeout=None):
         timeout = timeout if timeout is not None else self.default_timeout
-        """Returns list of dicts: {row, record_id, harm_level, event_description, status, centre}"""
+        """Returns list of dicts: {row, record_id, harm_level, event_description, status, centre}.
+        Reads cells by direct column index with NO per-cell waits, so a
+        single malformed row can never stall or crash the whole scan."""
         rows = self.find_all("record_rows", timeout=timeout)
         results = []
+
+        # Column indexes (1-based) as confirmed from the dashboard HTML.
+        col = {
+            "record_id": 1,
+            "centre": 3,
+            "event_description": 6,
+            "harm_level": 7,
+            "status": 10,
+        }
+
+        def cell_text(row_el, n):
+            try:
+                tds = row_el.find_elements(By.XPATH, "./td")
+                if len(tds) >= n:
+                    return (tds[n - 1].text or "").strip()
+            except Exception:
+                pass
+            return ""
+
         for row in rows:
             try:
-                harm_el = self.find_in(row, "harm_level_cell")
-                id_el = self.find_in(row, "record_id_cell")
-                desc_text = ""
-                try:
-                    desc_el = self.find_in(row, "event_description_cell")
-                    desc_text = self.safe_text(desc_el)
-                except (KeyError, NoSuchElementException, TimeoutException):
-                    pass
-                status_text = ""
-                try:
-                    status_el = self.find_in(row, "status_cell")
-                    status_text = self.safe_text(status_el)
-                except (KeyError, NoSuchElementException, TimeoutException):
-                    pass
-                centre_text = ""
-                try:
-                    centre_el = self.find_in(row, "centre_cell")
-                    centre_text = self.safe_text(centre_el)
-                except (KeyError, NoSuchElementException, TimeoutException):
-                    pass
+                rid = cell_text(row, col["record_id"])
+                if not rid:
+                    continue  # header/spacer/empty row
                 results.append({
                     "row": row,
-                    "record_id": self.safe_text(id_el),
-                    "harm_level": self.safe_text(harm_el),
-                    "event_description": desc_text,
-                    "status": status_text,
-                    "centre": centre_text,
+                    "record_id": rid,
+                    "harm_level": cell_text(row, col["harm_level"]),
+                    "event_description": cell_text(row, col["event_description"]),
+                    "status": cell_text(row, col["status"]),
+                    "centre": cell_text(row, col["centre"]),
                 })
-            except (NoSuchElementException, TimeoutException, StaleElementReferenceException):
+            except StaleElementReferenceException:
                 continue
         return results
 
@@ -549,9 +553,9 @@ class BrowserController:
                 continue
 
             # The radio input itself is often visually hidden (a styled
-            # <label> is shown instead). Clicking the label is what a human
-            # does and fires the correct native events. Prefer the wrapping
-            # or associated label; fall back to the input.
+            # <label> is shown instead), so click the wrapping/associated
+            # label -- the same target a human clicks, which fires the
+            # native events the site's logic responds to.
             target = radio
             try:
                 radio_id = radio.get_attribute("id")
@@ -559,10 +563,10 @@ class BrowserController:
                     labels = self.driver.find_elements(By.CSS_SELECTOR, f"label[for='{radio_id}']")
                     if labels:
                         target = labels[0]
-                else:
-                    parent = radio.find_element(By.XPATH, "./ancestor::label[1]")
-                    if parent:
-                        target = parent
+                if target is radio:
+                    parent_labels = radio.find_elements(By.XPATH, "./ancestor::label[1]")
+                    if parent_labels:
+                        target = parent_labels[0]
             except Exception:
                 pass
 
@@ -571,23 +575,11 @@ class BrowserController:
             except Exception:
                 self.driver.execute_script("arguments[0].click();", target)
 
-            time.sleep(0.2)  # brief settle for the conditional-logic JS
-            # Ensure the input is checked and fire BOTH native and jQuery
-            # change events -- this site's conditional-logic (show/hide of
-            # dependent questions) is jQuery-bound, and a label click alone
-            # doesn't always run those handlers.
-            try:
-                self.driver.execute_script(
-                    "var el = arguments[0];"
-                    "el.checked = true;"
-                    "el.dispatchEvent(new Event('change', {bubbles:true}));"
-                    "if (window.jQuery) { window.jQuery(el).trigger('change'); window.jQuery(el).trigger('click'); }",
-                    radio,
-                )
-            except Exception:
-                pass
-            time.sleep(0.3)  # let the reveal logic run
+            time.sleep(0.3)  # let the site's own logic react to the click
             return True
+
+        self.logger(f"No option '{value}' found in radio group '{field_name}'.", "warn")
+        return False
 
         self.logger(f"No option '{value}' found in radio group '{field_name}'.", "warn")
         return False
