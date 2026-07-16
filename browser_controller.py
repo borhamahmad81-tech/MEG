@@ -2,17 +2,10 @@
 browser_controller.py
 ----------------------
 Attaches to an ALREADY OPEN Chrome or Edge window (launched with a remote
-debugging port) rather than spawning a new controlled browser. This lets you
-log in / navigate manually first, then let the assistant take over on the
-same tab -- nothing about your session, cookies, or MFA is disturbed.
+debugging port) rather than spawning a new controlled browser.
 
-To make this work, the browser must be started with a debug port BEFORE you
-log into the site. Easiest way: use one of the generated shortcuts:
-    launch_chrome_debug.bat
-    launch_edge_debug.bat
-
-All CSS/XPath selectors used to find page elements live in
-config/selectors.json so this file never needs to be edited when the
+All CSS/XPath/ID selectors used to find page elements live in
+config/selectors.json so this file rarely needs to change when the
 clinical system's page markup changes -- only the config does.
 """
 
@@ -37,19 +30,28 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 DEFAULT_SELECTORS_PATH = os.path.join("config", "selectors.json")
 
-# Fallback defaults -- these are PLACEHOLDERS. Update config/selectors.json
-# with the real selectors from the clinical quality-management system
-# (right click element -> Inspect -> Copy selector).
+# Fallback defaults -- these are PLACEHOLDERS, overridden by config/selectors.json.
 DEFAULT_SELECTORS = {
-    "record_rows": {"type": "css", "value": "table#records tbody tr"},
-    "harm_level_cell": {"type": "css", "value": "td.harm-level"},
-    "record_id_cell": {"type": "css", "value": "td.record-id"},
-    "open_record_link": {"type": "css", "value": "a.open-record"},
-    "safety_event_description_field": {"type": "css", "value": "#safety_event_description"},
-    "free_text_description_field": {"type": "css", "value": "#free_text_description"},
-    "define_problem_field": {"type": "css", "value": "#define_the_problem"},
-    "why1_field": {"type": "css", "value": "#why_1"},
-    "save_button": {"type": "css", "value": "button#save-record"},
+    "record_rows": {"type": "css", "value": "div.widget-answertablewidget table.table-striped tbody tr"},
+    "record_id_cell": {"type": "css", "value": "td:nth-child(1)"},
+    "centre_cell": {"type": "css", "value": "td:nth-child(3)"},
+    "event_description_cell": {"type": "css", "value": "td:nth-child(6)"},
+    "harm_level_cell": {"type": "css", "value": "td:nth-child(7)"},
+    "status_cell": {"type": "css", "value": "td:nth-child(10)"},
+    "open_record_link": {"type": "css", "value": "a.answerTableLink"},
+    "safety_event_description_field": {"type": "id", "value": "id_aor_code"},
+    "free_text_description_field": {"type": "id", "value": "id_detailed_aor_description"},
+    "harm_level_field": {"type": "id", "value": "id_min_level_of_harm"},
+    "status_field": {"type": "id", "value": "id_status"},
+    "analysis_tool_field": {"type": "id", "value": "id_root_cause_analysis"},
+    "define_problem_field": {"type": "id", "value": "id_define_the_problem"},
+    "why1_field": {"type": "id", "value": "id_why_did_this_problem_occur_why_1"},
+    "why2_field": {"type": "id", "value": "id_why_did_this_problem_occur_why_2"},
+    "why3_field": {"type": "id", "value": "id_why_did_this_problem_occur_why_3"},
+    "why4_field": {"type": "id", "value": "id_why_did_this_problem_occur_why_4"},
+    "why5_field": {"type": "id", "value": "id_why_did_this_problem_occur_why_5"},
+    "safety_event_owner_field": {"type": "id", "value": "id_aor_owner"},
+    "save_button": {"type": "css", "value": "div.audit-report-controls button.btn-submit"},
 }
 
 
@@ -61,9 +63,9 @@ class BrowserController:
         self.debug_port = debug_port
         self.driver = None
         self.driver_path = (driver_path or "").strip() or None
+        self.default_timeout = default_timeout
         self.logger = logger or (lambda msg, level="info": None)
         self.selectors = self._load_selectors(selectors_path)
-        self.default_timeout = default_timeout
 
     # ------------------------------------------------------------------ #
     def _load_selectors(self, path):
@@ -90,16 +92,12 @@ class BrowserController:
         try:
             if self.browser == "edge":
                 options = EdgeOptions()
-                options.add_experimental_option(
-                    "debuggerAddress", f"127.0.0.1:{self.debug_port}"
-                )
+                options.add_experimental_option("debuggerAddress", f"127.0.0.1:{self.debug_port}")
                 service = EdgeService(executable_path=self.driver_path) if self.driver_path else None
                 self.driver = webdriver.Edge(options=options, service=service)
             else:
                 options = ChromeOptions()
-                options.add_experimental_option(
-                    "debuggerAddress", f"127.0.0.1:{self.debug_port}"
-                )
+                options.add_experimental_option("debuggerAddress", f"127.0.0.1:{self.debug_port}")
                 service = ChromeService(executable_path=self.driver_path) if self.driver_path else None
                 self.driver = webdriver.Chrome(options=options, service=service)
 
@@ -113,25 +111,18 @@ class BrowserController:
             if "Unable to obtain driver" in msg or "unable to discover" in msg.lower():
                 self.logger(
                     f"Could not auto-download the {self.browser.title()} driver "
-                    f"(likely no internet access to Microsoft's/Google's driver "
-                    f"server, or it's blocked by a firewall on this machine). "
-                    f"Fix: download the matching driver manually and set its "
-                    f"path in 'Driver Path (optional)' in the GUI. "
+                    f"(likely no internet access to the driver server, or it's blocked "
+                    f"by a firewall). Fix: download the matching driver manually and set "
+                    f"its path in 'Driver Path' in the GUI. "
                     f"Chrome: https://googlechromelabs.github.io/chrome-for-testing/ "
                     f"| Edge: https://developer.microsoft.com/microsoft-edge/tools/webdriver/",
                     "error",
                 )
             else:
-                self.logger(
-                    f"Could not attach to {self.browser.title()} on port {self.debug_port}: {exc}",
-                    "error",
-                )
+                self.logger(f"Could not attach to {self.browser.title()} on port {self.debug_port}: {exc}", "error")
             raise
         except Exception as exc:
-            self.logger(
-                f"Could not attach to {self.browser.title()} on port {self.debug_port}: {exc}",
-                "error",
-            )
+            self.logger(f"Could not attach to {self.browser.title()} on port {self.debug_port}: {exc}", "error")
             raise
 
     def is_attached(self) -> bool:
@@ -179,8 +170,7 @@ class BrowserController:
         )
         return context.find_elements(self._by(sel), sel["value"])
 
-    def find_in(self, element, key, timeout=None):
-        timeout = timeout if timeout is not None else self.default_timeout
+    def find_in(self, element, key, timeout=5):
         sel = self.selectors.get(key)
         if not sel:
             raise KeyError(f"Selector '{key}' is not configured in selectors.json")
@@ -195,83 +185,18 @@ class BrowserController:
             return ""
 
     # ------------------------------------------------------------------ #
-    # Direct URL navigation -- MEG (audits.megsupporttools.com) exposes a
-    # predictable per-record edit URL, so we can jump straight to a record
-    # instead of relying on clicking an icon in a table that might scroll,
-    # paginate, or re-render.
-    #   https://audits.megsupporttools.com/audit_builder/{country}/edit/{form_id}/observation/{record_id}/
-    # ------------------------------------------------------------------ #
-    def build_record_url(self, base_url, country, form_id, record_id):
-        base_url = base_url.rstrip("/")
-        return f"{base_url}/audit_builder/{country}/edit/{form_id}/observation/{record_id}/"
-
-    def navigate_to_record(self, base_url, country, form_id, record_id, timeout=None):
-        timeout = timeout if timeout is not None else self.default_timeout
-        url = self.build_record_url(base_url, country, form_id, record_id)
-
-        # driver.get() has been observed to crash msedgedriver with a blank
-        # error on some Edge versions when attached via remote-debugging
-        # (as opposed to a driver-launched session). Navigating via JS
-        # (window.location.href) uses a different underlying command and
-        # avoids that crash. One retry in case of a transient hiccup.
-        last_exc = None
-        for attempt in range(2):
-            try:
-                self.driver.execute_script("window.location.href = arguments[0];", url)
-                WebDriverWait(self.driver, timeout).until(
-                    EC.presence_of_element_located((By.ID, "observation-form"))
-                )
-                time.sleep(0.3)
-                return
-            except WebDriverException as exc:
-                last_exc = exc
-                self.logger(f"Navigation attempt {attempt + 1} failed, retrying...", "warn")
-                time.sleep(1)
-        raise last_exc
-
-    def navigate_to_dashboard(self, base_url, country, form_id, timeout=None):
-        timeout = timeout if timeout is not None else self.default_timeout
-        """Returns to the dashboard/list page. Required after opening any
-        individual record, since the row elements captured from a previous
-        page load go stale the moment the browser navigates away -- this
-        must be called before re-reading the table for the next record."""
-        base_url = base_url.rstrip("/")
-        url = f"{base_url}/{country}/dashboard/report/{form_id}/0"
-
-        last_exc = None
-        for attempt in range(2):
-            try:
-                self.driver.execute_script("window.location.href = arguments[0];", url)
-                WebDriverWait(self.driver, timeout).until(
-                    EC.presence_of_element_located((self._by(self.selectors["record_rows"]), self.selectors["record_rows"]["value"]))
-                )
-                time.sleep(0.3)
-                return
-            except WebDriverException as exc:
-                last_exc = exc
-                self.logger(f"Returning to dashboard attempt {attempt + 1} failed, retrying...", "warn")
-                time.sleep(1)
-        raise last_exc
-
-    # ------------------------------------------------------------------ #
     # Component A: Level of Harm safety filter -- reads the visible table
     # ------------------------------------------------------------------ #
     def get_record_rows(self, timeout=None):
-        timeout = timeout if timeout is not None else self.default_timeout
         """Returns list of dicts: {row, record_id, harm_level, event_description, status, centre}.
         Reads cells by direct column index with NO per-cell waits, so a
         single malformed row can never stall or crash the whole scan."""
+        timeout = timeout if timeout is not None else self.default_timeout
         rows = self.find_all("record_rows", timeout=timeout)
         results = []
 
         # Column indexes (1-based) as confirmed from the dashboard HTML.
-        col = {
-            "record_id": 1,
-            "centre": 3,
-            "event_description": 6,
-            "harm_level": 7,
-            "status": 10,
-        }
+        col = {"record_id": 1, "centre": 3, "event_description": 6, "harm_level": 7, "status": 10}
 
         def cell_text(row_el, n):
             try:
@@ -316,11 +241,34 @@ class BrowserController:
                 last_exc = exc
                 self.logger(f"Opening record attempt {attempt + 1} failed, retrying...", "warn")
                 time.sleep(1)
-                # link may need to be re-located after a failed attempt
                 try:
                     link = self.find_in(row_element, "open_record_link")
                 except Exception:
                     pass
+        raise last_exc
+
+    def navigate_to_dashboard(self, base_url, country, form_id, timeout=None):
+        """Returns to the dashboard/list page. Required after opening any
+        individual record, since row elements captured from a previous page
+        load go stale the moment the browser navigates away."""
+        timeout = timeout if timeout is not None else self.default_timeout
+        base_url = base_url.rstrip("/")
+        url = f"{base_url}/{country}/dashboard/report/{form_id}/0"
+
+        last_exc = None
+        for attempt in range(2):
+            try:
+                self.driver.execute_script("window.location.href = arguments[0];", url)
+                sel = self.selectors["record_rows"]
+                WebDriverWait(self.driver, timeout).until(
+                    EC.presence_of_element_located((self._by(sel), sel["value"]))
+                )
+                time.sleep(0.3)
+                return
+            except WebDriverException as exc:
+                last_exc = exc
+                self.logger(f"Returning to dashboard attempt {attempt + 1} failed, retrying...", "warn")
+                time.sleep(1)
         raise last_exc
 
     # ------------------------------------------------------------------ #
@@ -329,11 +277,9 @@ class BrowserController:
     def read_event_code_text(self) -> str:
         el = self.find("safety_event_description_field")
         # Prefer data-value: on readonly <span> display fields (used when the
-        # containing accordion section is collapsed, e.g. on the Management
-        # Approval page), Selenium's .text only returns VISIBLE text and
-        # silently comes back empty if the section is hidden -- data-value
-        # holds the real content regardless of visibility. For live <select>
-        # elements data-value won't exist, so this falls through correctly.
+        # containing accordion section is collapsed), Selenium's .text only
+        # returns VISIBLE text and silently comes back empty if the section
+        # is hidden -- data-value holds the real content regardless.
         data_value = el.get_attribute("data-value")
         if data_value:
             return data_value.strip()
@@ -353,8 +299,6 @@ class BrowserController:
         self._fill_field("why1_field", text)
 
     def fill_why(self, n: int, text: str):
-        """Fill Why_Option n (1-5). Silently does nothing if that Why field
-        isn't configured in selectors.json (e.g. only why1-5 are mapped)."""
         key = f"why{n}_field"
         if key not in self.selectors:
             self.logger(f"No selector configured for '{key}' -- skipping cause #{n}.", "warn")
@@ -369,10 +313,6 @@ class BrowserController:
             self._select_option(el, text)
             return
 
-        # Right after clicking a radio button that reveals this field via
-        # JS (e.g. "Launch Analysis Tool"), the field can briefly exist in
-        # the DOM but not yet be visible/enabled -- wait for it to actually
-        # become interactable, with a couple of retries as a safety net.
         last_exc = None
         for attempt in range(5):
             try:
@@ -396,87 +336,6 @@ class BrowserController:
         from selenium.webdriver.support.ui import Select
         Select(select_element).select_by_visible_text(visible_text)
 
-    def expand_section_by_heading_text(self, heading_text: str, timeout=5):
-        """Finds a clickable accordion/panel heading containing this text
-        and clicks it to expand the section. Safe no-op if not found (e.g.
-        already expanded) or if clicking fails for any reason."""
-        try:
-            xpath = (
-                f"//*[self::a or self::h1 or self::h2 or self::h3 or self::div or self::span]"
-                f"[contains(translate(normalize-space(text()),"
-                f"'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),"
-                f"'{heading_text.lower()}')]"
-            )
-            elements = WebDriverWait(self.driver, timeout).until(
-                lambda d: d.find_elements(By.XPATH, xpath) or False
-            )
-            target = elements[0]
-            try:
-                target.click()
-            except Exception:
-                self.driver.execute_script("arguments[0].click();", target)
-            time.sleep(0.8)
-            self.logger(f"Expanded section '{heading_text}'.", "info")
-            return True
-        except (TimeoutException, NoSuchElementException):
-            return False
-        except Exception as exc:
-            self.logger(f"Could not expand section '{heading_text}': {exc}", "warn")
-            return False
-
-    def wait_for_element_visible(self, element_id: str, timeout=8):
-        """Polls whether the element (and its ancestors) are actually
-        visible yet -- used to give the site's own JS a real chance to
-        reveal a conditional section naturally before we resort to forcing
-        it via force_element_visible()."""
-        script = """
-        var el = document.getElementById(arguments[0]);
-        if (!el) return false;
-        var node = el;
-        while (node) {
-            if (node.style && node.style.display === 'none') return false;
-            node = node.parentElement;
-        }
-        return true;
-        """
-        try:
-            return WebDriverWait(self.driver, timeout).until(
-                lambda d: d.execute_script(script, element_id)
-            )
-        except TimeoutException:
-            return False
-
-    def force_element_visible(self, element_id: str):
-        """The Root Cause Analysis section (and possibly others) is hidden
-        via a plain inline style="display: none" on an ancestor div, with
-        no clickable header at all -- there's nothing to click to reveal
-        it. This forces it visible directly by walking up the DOM from the
-        given element and clearing any inline display:none found, bypassing
-        whatever site JS normally controls it."""
-        script = """
-        var el = document.getElementById(arguments[0]);
-        if (!el) return false;
-        var node = el;
-        var cleared = 0;
-        while (node) {
-            if (node.style && node.style.display === 'none') {
-                node.style.display = '';
-                cleared++;
-            }
-            node = node.parentElement;
-        }
-        return cleared;
-        """
-        try:
-            cleared = self.driver.execute_script(script, element_id)
-            if cleared:
-                self.logger(f"Force-revealed hidden section containing '{element_id}' ({cleared} ancestor(s)).", "info")
-            time.sleep(0.3)
-            return bool(cleared)
-        except Exception as exc:
-            self.logger(f"Could not force-show element '{element_id}': {exc}", "warn")
-            return False
-
     def click_save(self, timeout=None):
         timeout = timeout if timeout is not None else self.default_timeout
         sel = self.selectors["save_button"]
@@ -499,45 +358,10 @@ class BrowserController:
         raise last_exc
 
     # ------------------------------------------------------------------ #
-    # Generic radio-button-group support (e.g. the "Clinic Management
-    # Approval" Yes/No questions). Django typically renders a radio group
-    # as several <input type="radio" name="field_name" value="Yes/No">
-    # sharing the same name. Not yet wired into the automation flow (that
-    # screen belongs to a different role/stage), but available for when it
-    # is needed.
+    # Generic radio-button-group support
     # ------------------------------------------------------------------ #
-    def wait_for_field_present(self, key, timeout=10):
-        """Waits until the configured field `key` exists AND is displayed."""
-        sel = self.selectors.get(key)
-        if not sel:
-            return False
-        try:
-            return WebDriverWait(self.driver, timeout).until(
-                lambda d: any(e.is_displayed() for e in d.find_elements(self._by(sel), sel["value"])) or False
-            )
-        except TimeoutException:
-            self.logger(f"Field '{key}' did not appear within {timeout}s.", "warn")
-            return False
-
-    def wait_for_radio_group_present(self, field_name: str, timeout=10):
-        """Waits until at least one radio input for this field group exists
-        AND is displayed -- used before answering a conditionally-revealed
-        question so we don't set it while it's still hidden."""
-        xpath = f"//input[@type='radio' and @name='{field_name}']"
-        try:
-            return WebDriverWait(self.driver, timeout).until(
-                lambda d: any(r.is_displayed() for r in d.find_elements(By.XPATH, xpath)) or False
-            )
-        except TimeoutException:
-            self.logger(f"Radio group '{field_name}' did not appear within {timeout}s.", "warn")
-            return False
-
     def set_radio_group(self, field_name: str, value: str, timeout=None):
         timeout = timeout if timeout is not None else self.default_timeout
-        """Selects the radio in group `field_name` whose value matches
-        `value` (case-insensitive) by clicking its wrapping <label> -- the
-        same thing a human clicks -- which fires the events the site's
-        conditional-logic JS listens for."""
         xpath = f"//input[@type='radio' and @name='{field_name}']"
         try:
             radios = WebDriverWait(self.driver, timeout).until(
@@ -554,8 +378,7 @@ class BrowserController:
 
             # The radio input itself is often visually hidden (a styled
             # <label> is shown instead), so click the wrapping/associated
-            # label -- the same target a human clicks, which fires the
-            # native events the site's logic responds to.
+            # label -- the same target a human clicks.
             target = radio
             try:
                 radio_id = radio.get_attribute("id")
@@ -581,37 +404,45 @@ class BrowserController:
         self.logger(f"No option '{value}' found in radio group '{field_name}'.", "warn")
         return False
 
-        self.logger(f"No option '{value}' found in radio group '{field_name}'.", "warn")
-        return False
+    def wait_for_radio_group_present(self, field_name: str, timeout=10):
+        xpath = f"//input[@type='radio' and @name='{field_name}']"
+        try:
+            return WebDriverWait(self.driver, timeout).until(
+                lambda d: any(r.is_displayed() for r in d.find_elements(By.XPATH, xpath)) or False
+            )
+        except TimeoutException:
+            self.logger(f"Radio group '{field_name}' did not appear within {timeout}s.", "warn")
+            return False
+
+    def wait_for_field_present(self, key, timeout=10):
+        sel = self.selectors.get(key)
+        if not sel:
+            return False
+        try:
+            return WebDriverWait(self.driver, timeout).until(
+                lambda d: any(e.is_displayed() for e in d.find_elements(self._by(sel), sel["value"])) or False
+            )
+        except TimeoutException:
+            self.logger(f"Field '{key}' did not appear within {timeout}s.", "warn")
+            return False
 
     # ------------------------------------------------------------------ #
-    # Confirmed radio groups on the Analysis/Investigation & Closing
-    # sections (real field `name=` attributes, found in a saved live page).
+    # Confirmed radio groups: Root Cause Analysis / Closing
     # ------------------------------------------------------------------ #
     def set_launch_analysis_tool(self, tool_name="5 Whys"):
-        """This radio group -- NOT the old id_root_cause_analysis span -- is
-        what actually reveals Define the problem / Why 1-5."""
-        result = self.set_radio_group("launch_analysis_tool", tool_name)
-        if result:
-            time.sleep(0.5)  # let the JS reveal/enable the Define/Why fields
-        return result
+        return self.set_radio_group("launch_analysis_tool", tool_name)
 
     def set_root_cause_flag(self, n: int, value="Yes"):
-        """Sets 'Is this the root cause of the problem (n)?' for Why field n (1-10)."""
         return self.set_radio_group(f"is_this_the_root_cause_of_the_problem_{n}", value)
 
     def set_analysis_completed(self, value="Yes"):
-        result = self.set_radio_group("has_the_analysis_for_this_event_been_completed", value)
-        if result and value.strip().lower() == "no":
-            time.sleep(0.5)  # let the JS reveal the next Why field
-        return result
+        return self.set_radio_group("has_the_analysis_for_this_event_been_completed", value)
 
     def set_further_actions_required(self, value="No"):
         return self.set_radio_group("are_further_actions_required", value)
 
     # ------------------------------------------------------------------ #
-    # Confirmed Clinic Management Approval section radio groups (same
-    # single-page form, different accordion section).
+    # Confirmed radio groups: Clinic Management Approval
     # ------------------------------------------------------------------ #
     def set_code_correct(self, value="Yes"):
         return self.set_radio_group("is_the_code_correct", value)
@@ -626,8 +457,7 @@ class BrowserController:
         return self.set_radio_group("does_the_safety_event_requires_additional_escalation_to_managem", value)
 
     # ------------------------------------------------------------------ #
-    # Safety Event Owner -- a Select2 "search as you type" widget (not a
-    # plain <select>), confirmed against a real Analysis/Investigation page.
+    # Safety Event Owner -- Select2 "search as you type" widget
     # ------------------------------------------------------------------ #
     def read_owner_display_text(self, field_key="safety_event_owner_field"):
         sel = self.selectors.get(field_key)
@@ -642,16 +472,12 @@ class BrowserController:
 
     def ensure_safety_event_owner(self, name, field_key="safety_event_owner_field", timeout=None):
         timeout = timeout if timeout is not None else self.default_timeout
-        """Checks the current Safety Event Owner and, if it doesn't already
-        match `name`, opens the Select2 widget, types the search text, waits
-        for the AJAX-loaded matching result, and clicks it. Returns True if
-        a change was made, False if it was already correct."""
         if not name:
             return False
 
         current = self.read_owner_display_text(field_key)
         if name.lower() in current.lower():
-            return False  # already correct -- avoid an unnecessary AJAX round-trip
+            return False  # already correct
 
         sel = self.selectors.get(field_key)
         if not sel:
@@ -660,10 +486,6 @@ class BrowserController:
         select_id = sel["value"]
 
         try:
-            # Click the actual clickable Select2 toggle (the container span
-            # itself is just the rendered text, not always what Select2
-            # binds its open() handler to -- its parent .select2-selection
-            # element is the reliable click target).
             display_span = self.driver.find_element(By.ID, f"select2-{select_id}-container")
             toggle = display_span.find_element(By.XPATH, "./ancestor::*[contains(@class,'select2-selection')][1]")
             try:
@@ -671,16 +493,12 @@ class BrowserController:
             except Exception:
                 self.driver.execute_script("arguments[0].click();", toggle)
 
-            # Select2 appends its dropdown to <body>; if any stale search
-            # fields exist from a prior interaction, the newest one (last in
-            # document order) is the one that's actually open now.
             search_inputs = WebDriverWait(self.driver, timeout).until(
                 lambda d: d.find_elements(By.CSS_SELECTOR, "input.select2-search__field") or False
             )
             search_input = search_inputs[-1]
             search_input.send_keys(name)
 
-            # Verify the text actually landed before waiting on AJAX results.
             typed_value = search_input.get_attribute("value") or ""
             if name.lower() not in typed_value.lower():
                 self.logger(
@@ -698,9 +516,6 @@ class BrowserController:
                 ))
             )
             option.click()
-            # Select2's dropdown can linger open/overlapping nearby elements
-            # for a moment after selecting -- force it closed and give the
-            # page a beat to settle before any further field interactions.
             try:
                 self.driver.execute_script("document.activeElement.blur();")
                 from selenium.webdriver.common.keys import Keys
@@ -714,18 +529,36 @@ class BrowserController:
             self.logger(f"Could not set Safety Event Owner to '{name}': {exc}", "warn")
             return False
 
-    def set_analysis_tool(self, tool_name="5 Whys"):
-        """SUPERSEDED: the actual control that reveals Define/Why fields is
-        the 'launch_analysis_tool' radio group -- see set_launch_analysis_tool().
-        Kept only as a harmless no-op fallback for the id_root_cause_analysis
-        field, which was confirmed to always be a hidden span."""
+    # ------------------------------------------------------------------ #
+    # Generic Yes/No radio group helper for other screens (e.g. Clinic
+    # Management Approval read via visible text), kept for reuse.
+    # ------------------------------------------------------------------ #
+    def force_element_visible(self, element_id: str):
+        """Walks up from the given element and clears any inline
+        'display: none' found on it or its ancestors. NOTE: this can break
+        page layout if used on containers with meaningful CSS -- prefer
+        wait_for_radio_group_present()/wait_for_field_present() first and
+        only use this as an explicit, deliberate last resort."""
+        script = """
+        var el = document.getElementById(arguments[0]);
+        if (!el) return false;
+        var node = el;
+        var cleared = 0;
+        while (node) {
+            if (node.style && node.style.display === 'none') {
+                node.style.display = '';
+                cleared++;
+            }
+            node = node.parentElement;
+        }
+        return cleared;
+        """
         try:
-            el = self.find("analysis_tool_field", timeout=3)
-        except (KeyError, TimeoutException, NoSuchElementException):
+            cleared = self.driver.execute_script(script, element_id)
+            if cleared:
+                self.logger(f"Force-revealed hidden section containing '{element_id}' ({cleared} level(s)).", "info")
+                time.sleep(0.3)
+            return bool(cleared)
+        except Exception as exc:
+            self.logger(f"Could not force-reveal '{element_id}': {exc}", "warn")
             return False
-
-        if el.tag_name.lower() == "select":
-            self._select_option(el, tool_name)
-            time.sleep(0.3)
-            return True
-        return False  # already set, or a readonly span (closed record)

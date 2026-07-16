@@ -1,22 +1,15 @@
 """
 automation_worker.py
 ---------------------
-Runs the full web-scrape & auto-analyze pass in a background thread so the
-GUI stays responsive. Talks to the GUI only through thread-safe queues:
-
-  log_queue      -> (message, level) tuples for the console
-  review_queue    -> requests for the GUI to show the Human-in-the-Loop modal
-  review_response -> the GUI's answer to a pending review request (or None)
-  status_queue    -> dict updates for the status bar counters
-
-This file contains NO GUI code, so it can also be unit-tested headlessly.
+Runs the full web-scrape & auto-analyze pass in a background thread.
+Talks to the GUI only through thread-safe queues.
 """
 
 import queue
 import threading
 import time
 
-from rules_engine import RulesEngine, RuleNotFoundError
+from rules_engine import RulesEngine
 from browser_controller import BrowserController
 from deferred_queue import DeferredQueue
 
@@ -115,10 +108,6 @@ class AutomationWorker(threading.Thread):
             return
 
         if self._single_test_stop:
-            # Test Mode Stage 1: "open from queue + fill, stop before next".
-            # We already stopped right after handling the one test record --
-            # skip the deferred/review phase entirely, this was just a
-            # single-record dry run.
             self._final_report("TEST MODE - STAGE 1 (single record) complete")
             return
 
@@ -161,9 +150,10 @@ class AutomationWorker(threading.Thread):
                     rows = self.browser.get_record_rows()
                     break
                 except Exception as exc:
-                    msg = str(exc).strip().splitlines()[0] if str(exc).strip() else "(blank error)"
+                    full_msg = repr(exc)
                     self.log(
-                        f"Reading records table failed (attempt {read_attempt + 1}/4): {msg} -- retrying...",
+                        f"Reading records table failed (attempt {read_attempt + 1}/4) "
+                        f"[{type(exc).__name__}]: {full_msg} -- retrying...",
                         "warn",
                     )
                     time.sleep(2)
@@ -235,7 +225,7 @@ class AutomationWorker(threading.Thread):
             try:
                 self._process_single_record(record)
             except Exception as exc:
-                self.log(f"[Error] ID: {record_id}: {exc}", "error")
+                self.log(f"[Error] ID: {record_id} [{type(exc).__name__}]: {repr(exc)}", "error")
 
             if self._test_single_record_mode:
                 self._single_test_stop = True
@@ -271,12 +261,6 @@ class AutomationWorker(threading.Thread):
                 "warn",
             )
             self._defer_or_review(record_id, event_code or "UNKNOWN", "")
-            return
-
-        if not self.rules.is_code_active(event_code):
-            self.log(f"[Skipped] ID: {record_id} ({event_code}): not in selected codes.", "info")
-            self.counts["skipped"] += 1
-            self.push_status()
             return
 
         free_text = self.browser.read_free_text_description()
@@ -321,20 +305,17 @@ class AutomationWorker(threading.Thread):
         both normal mode (immediately followed by Save) and Test Mode (where
         the user reviews the filled page before approving the Save).
 
-        The page reveals fields in a strict dependency chain (confirmed from
-        the page's own condition-data config):
+        The page reveals fields in a dependency chain (confirmed from the
+        page's own condition-data config):
           is_the_information_complete = Yes  -> reveals do_you_accept_the_aor
           do_you_accept_the_aor       = Yes  -> reveals Analysis & Investigation
                                                 (Root Cause + Launch Analysis Tool)
           launch_analysis_tool        = 5 Whys -> reveals Define the problem / Why
-        So each step must WAIT for the next field to actually appear before
-        continuing, otherwise we act on fields that aren't active yet.
         """
         # --- Clinic Management Approval section ---
         self.browser.set_code_correct("Yes")
         self.browser.set_information_complete("Yes")
 
-        # Wait for "Do you approve the safety event?" to appear, then set it.
         self.browser.wait_for_radio_group_present("do_you_accept_the_aor", timeout=6)
         self.browser.set_approve_safety_event("Yes")
 
@@ -342,16 +323,11 @@ class AutomationWorker(threading.Thread):
         self.browser.ensure_safety_event_owner(self.settings.get("safety_event_owner_name", "Ahmed Mohamed, Specialist"))
 
         # Approving reveals the Analysis & Investigation section, whose first
-        # control is the Launch Analysis Tool radio. Give the site's own
-        # jQuery conditional-logic time to reveal it naturally. We do NOT
-        # force CSS here -- brute-forcing display:none on ancestor containers
-        # breaks the page layout and hides the very radios we need.
+        # control is the Launch Analysis Tool radio.
         self.browser.wait_for_radio_group_present("launch_analysis_tool", timeout=6)
-
         self.browser.set_launch_analysis_tool(self.settings.get("analysis_tool_name", "5 Whys"))
 
-        # Choosing "5 Whys" reveals Define the problem + Why boxes. Wait for
-        # the Define box to actually be present before typing into it.
+        # Choosing "5 Whys" reveals Define the problem + Why boxes.
         self.browser.wait_for_field_present("define_problem_field", timeout=6)
         self.browser.fill_define_problem(define_text)
 
@@ -373,9 +349,7 @@ class AutomationWorker(threading.Thread):
         # Closing section (revealed by the final "Yes" above). We must wait
         # for the "Are further actions required?" field to actually appear
         # before answering it -- otherwise the answer lands on a not-yet-
-        # active field, leaving it effectively unanswered, which per the
-        # site's own status logic keeps the record stuck in
-        # "Analysis / Investigation" instead of moving it to "Closed".
+        # active field, leaving it effectively unanswered.
         # Lessons Learned is intentionally left untouched.
         self.browser.wait_for_radio_group_present("are_further_actions_required", timeout=6)
         self.browser.set_further_actions_required("No")
@@ -423,14 +397,16 @@ class AutomationWorker(threading.Thread):
         )
 
     # ------------------------------------------------------------------ #
-    # Component D: Human-in-the-Loop Timeout & Deferred Queue
-    # ------------------------------------------------------------------ #
     def _defer_or_review(self, record_id, event_code, free_text):
         """No popup, no waiting -- log it, add to the Deferred Queue, and
         return immediately so the main loop moves straight to the next
         record. You review deferred records yourself afterward, at your
         own pace (they're saved in deferred_queue.json)."""
-        self.log(f"[Deferred] ID: {record_id} ({event_code}): could not auto-determine the problem. Moved to Deferred Queue for manual review later.", "warn")
+        self.log(
+            f"[Deferred] ID: {record_id} ({event_code}): could not auto-determine "
+            f"the problem. Moved to Deferred Queue for manual review later.",
+            "warn",
+        )
         self.deferred.add(record_id, event_code, free_text, reason="no_match")
         self.counts["deferred"] += 1
         self.push_status()
