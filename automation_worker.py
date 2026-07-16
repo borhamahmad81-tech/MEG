@@ -335,24 +335,24 @@ class AutomationWorker(threading.Thread):
         self.browser.set_information_complete("Yes")
 
         # Wait for "Do you approve the safety event?" to appear, then set it.
-        self.browser.wait_for_radio_group_present("do_you_accept_the_aor", timeout=3)
+        self.browser.wait_for_radio_group_present("do_you_accept_the_aor", timeout=6)
         self.browser.set_approve_safety_event("Yes")
 
         self.browser.set_requires_escalation("No")
         self.browser.ensure_safety_event_owner(self.settings.get("safety_event_owner_name", "Ahmed Mohamed, Specialist"))
 
         # Approving reveals the Analysis & Investigation section, whose first
-        # control is the Launch Analysis Tool radio. Wait for it to appear
-        # (fall back to a CSS force-reveal only if the site's JS didn't do it).
-        if not self.browser.wait_for_radio_group_present("launch_analysis_tool", timeout=3):
-            self.browser.force_element_visible("id_root_cause_analysis")
-            self.browser.wait_for_radio_group_present("launch_analysis_tool", timeout=3)
+        # control is the Launch Analysis Tool radio. Give the site's own
+        # jQuery conditional-logic time to reveal it naturally. We do NOT
+        # force CSS here -- brute-forcing display:none on ancestor containers
+        # breaks the page layout and hides the very radios we need.
+        self.browser.wait_for_radio_group_present("launch_analysis_tool", timeout=6)
 
         self.browser.set_launch_analysis_tool(self.settings.get("analysis_tool_name", "5 Whys"))
 
         # Choosing "5 Whys" reveals Define the problem + Why boxes. Wait for
         # the Define box to actually be present before typing into it.
-        self.browser.wait_for_field_present("define_problem_field", timeout=3)
+        self.browser.wait_for_field_present("define_problem_field", timeout=6)
         self.browser.fill_define_problem(define_text)
 
         if not causes:
@@ -377,7 +377,7 @@ class AutomationWorker(threading.Thread):
         # site's own status logic keeps the record stuck in
         # "Analysis / Investigation" instead of moving it to "Closed".
         # Lessons Learned is intentionally left untouched.
-        self.browser.wait_for_radio_group_present("are_further_actions_required", timeout=3)
+        self.browser.wait_for_radio_group_present("are_further_actions_required", timeout=6)
         self.browser.set_further_actions_required("No")
 
     # ------------------------------------------------------------------ #
