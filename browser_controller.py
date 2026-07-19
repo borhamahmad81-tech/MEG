@@ -105,6 +105,7 @@ class BrowserController:
                 f"Attached to existing {self.browser.title()} session on port {self.debug_port}.",
                 "success",
             )
+            self.log_attached_context()
             return self.driver
         except WebDriverException as exc:
             msg = str(exc)
@@ -124,6 +125,106 @@ class BrowserController:
         except Exception as exc:
             self.logger(f"Could not attach to {self.browser.title()} on port {self.debug_port}: {exc}", "error")
             raise
+
+    # ------------------------------------------------------------------ #
+    # Tab handling. Attaching to a debug browser gives us whichever tab the
+    # driver picked -- NOT necessarily the one the user is looking at. If an
+    # extra tab is open (new-tab page, leftover login redirect), the app can
+    # sit on a blank tab waiting for a table that lives in the tab next door.
+    # ------------------------------------------------------------------ #
+    def log_attached_context(self):
+        try:
+            handles = self.driver.window_handles
+            self.logger(
+                f"Attached to tab: '{self.driver.title}' | {self.driver.current_url} "
+                f"({len(handles)} tab(s) open in this browser)",
+                "info",
+            )
+        except Exception as exc:
+            self.logger(f"Could not read the attached tab's context: {exc}", "warn")
+
+    def _tab_has_rows(self) -> bool:
+        sel = self.selectors["record_rows"]
+        try:
+            return len(self.driver.find_elements(self._by(sel), sel["value"])) > 0
+        except Exception:
+            return False
+
+    def ensure_tab_with_rows(self) -> bool:
+        """If the current tab has no record rows, look through the other open
+        tabs and switch to one that does. Returns True if we ended up on a tab
+        containing the records table."""
+        if self._tab_has_rows():
+            return True
+
+        try:
+            handles = list(self.driver.window_handles)
+            original = self.driver.current_window_handle
+        except Exception as exc:
+            self.logger(f"Could not enumerate browser tabs: {exc}", "warn")
+            return False
+
+        if len(handles) > 1:
+            self.logger(
+                f"No records table in the current tab -- scanning {len(handles)} open tab(s)...",
+                "warn",
+            )
+
+        for handle in handles:
+            try:
+                self.driver.switch_to.window(handle)
+                if self._tab_has_rows():
+                    self.logger(
+                        f"Found the records table in tab: {self.driver.current_url}",
+                        "success",
+                    )
+                    return True
+                self.logger(f"  - no records table in: {self.driver.current_url}", "info")
+            except Exception:
+                continue
+
+        try:
+            self.driver.switch_to.window(original)
+        except Exception:
+            pass
+        return False
+
+    def _log_table_diagnostics(self):
+        """Called when the records table can't be found, to say WHY rather
+        than just timing out."""
+        try:
+            url = self.driver.current_url
+            title = self.driver.title
+            generic_rows = len(self.driver.find_elements(By.CSS_SELECTOR, "table tbody tr"))
+            iframes = len(self.driver.find_elements(By.TAG_NAME, "iframe"))
+            self.logger(
+                f"Diagnostics -- current tab: '{title}' | {url}\n"
+                f"  Generic 'table tbody tr' found on this page: {generic_rows}\n"
+                f"  iframes on this page: {iframes}",
+                "warn",
+            )
+            if generic_rows == 0 and iframes == 0:
+                self.logger(
+                    "  There is no table at all on this page. You are most likely on a "
+                    "login/redirect page rather than the dashboard -- log in, open the "
+                    "'All Safety Events' dashboard, wait for rows, then Start again.",
+                    "warn",
+                )
+            elif generic_rows > 0:
+                self.logger(
+                    "  A table IS present but does not match the configured selector. "
+                    "The site's markup may have changed -- check record_rows in "
+                    "config/selectors.json.",
+                    "warn",
+                )
+            elif iframes > 0:
+                self.logger(
+                    "  The page has iframes -- the table may be inside one, which "
+                    "requires switching into that frame first.",
+                    "warn",
+                )
+        except Exception as exc:
+            self.logger(f"Could not gather page diagnostics: {exc}", "warn")
 
     def is_attached(self) -> bool:
         if self.driver is None:
@@ -192,7 +293,16 @@ class BrowserController:
         Reads cells by direct column index with NO per-cell waits, so a
         single malformed row can never stall or crash the whole scan."""
         timeout = timeout if timeout is not None else self.default_timeout
-        rows = self.find_all("record_rows", timeout=timeout)
+
+        # Make sure we're actually on the tab holding the dashboard before
+        # spending the full timeout waiting on the wrong page.
+        self.ensure_tab_with_rows()
+
+        try:
+            rows = self.find_all("record_rows", timeout=timeout)
+        except TimeoutException:
+            self._log_table_diagnostics()
+            raise
         results = []
 
         # Column indexes (1-based) as confirmed from the dashboard HTML.
