@@ -219,6 +219,16 @@ class SafetyEventAssistantApp(ctk.CTk):
         )
         self.rules_path_label.pack(padx=12, pady=(0, 10), anchor="w")
 
+        ctk.CTkButton(file_frame, text="Load Patient List (optional)",
+                      command=self._choose_patient_list).pack(padx=12, pady=(6, 2), fill="x")
+        self.patient_list_label = ctk.CTkLabel(
+            file_frame,
+            text=(self.settings.get("patient_list_path") or
+                  "No patient list selected - summary will show 'Not found' for names."),
+            wraplength=380, justify="left", text_color="#9A9A9A",
+        )
+        self.patient_list_label.pack(padx=12, pady=(0, 10), anchor="w")
+
         ctk.CTkLabel(file_frame, text="MEG Site Settings", font=ctk.CTkFont(weight="bold")).pack(
             anchor="w", padx=12, pady=(10, 4)
         )
@@ -409,6 +419,18 @@ class SafetyEventAssistantApp(ctk.CTk):
         if path:
             self.settings.set("rules_matrix_path", path)
             self.rules_path_label.configure(text=path)
+
+    def _choose_patient_list(self):
+        path = filedialog.askopenfilename(
+            title="Select Patient List (Excel or CSV with 'Patient ID' and 'Patient Name')",
+            filetypes=[("Excel or CSV", "*.xlsx *.csv"), ("Excel files", "*.xlsx"),
+                       ("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        self.settings.set("patient_list_path", path)
+        self.patient_list_label.configure(text=path)
+        self._log(f"Patient list selected: {path}", "info")
 
     def _open_selectors_folder(self):
         cfg_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config")

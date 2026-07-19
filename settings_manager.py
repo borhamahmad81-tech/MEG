@@ -42,6 +42,11 @@ DEFAULT_SETTINGS = {
     "test_stage": "single",  # "single" (Stage 1) or "full" (Stage 2)
     "bulk_test_mode": False,
     "safety_event_owner_name": "Ahmed Mohamed, Specialist",
+    # Optional patient list (Excel/CSV with 'Patient ID' + 'Patient Name'),
+    # used only to add names to the end-of-run summary report.
+    "patient_list_path": "",
+    # Where run_summary_*.xlsx files are written. Blank = next to the app.
+    "summary_report_folder": "",
 }
 
 
@@ -70,6 +75,10 @@ class SettingsManager:
     def set(self, key, value):
         self.data[key] = value
         self.save()
+
+    def base_dir(self):
+        """Folder the app is running from (next to the EXE when frozen)."""
+        return _base_dir()
 
     def resolve_path(self, key):
         """Resolve a stored relative path against the app's base directory."""

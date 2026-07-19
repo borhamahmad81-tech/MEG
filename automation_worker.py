@@ -12,6 +12,7 @@ import time
 from rules_engine import RulesEngine
 from browser_controller import BrowserController
 from deferred_queue import DeferredQueue
+from run_summary import RunSummary
 
 SERIOUS_LABEL = "serious"
 
@@ -37,6 +38,10 @@ class AutomationWorker(threading.Thread):
         self.deferred = DeferredQueue(settings.resolve_path("deferred_queue_path"))
 
         self.counts = {"processed": 0, "deferred": 0, "blocked": 0, "skipped": 0}
+
+        # End-of-run report (patient names + what was done per record).
+        self.summary = RunSummary(logger=self.log)
+        self._current_patient_id = ""
 
     # ------------------------------------------------------------------ #
     def log(self, message, level="info"):
@@ -88,6 +93,16 @@ class AutomationWorker(threading.Thread):
                 "info",
             )
 
+        patient_list_path = self.settings.resolve_path("patient_list_path")
+        if patient_list_path:
+            self.summary.load_patient_list(patient_list_path)
+        else:
+            self.log(
+                "No patient list selected -- the summary will still be produced, "
+                "with patient names shown as 'Not found'.",
+                "info",
+            )
+
         self.browser = BrowserController(
             browser=self.settings.get("browser", "chrome"),
             debug_port=self.settings.get("debug_port", 9222),
@@ -132,6 +147,17 @@ class AutomationWorker(threading.Thread):
             else "Stopped after the first record, as requested for Stage 1 testing.",
         ]
         self.log("\n".join(lines), "report")
+
+        # Write the per-record summary workbook (patient names + what was done).
+        folder = self.settings.resolve_path("summary_report_folder")
+        if not folder:
+            try:
+                folder = self.settings.base_dir()
+            except Exception:
+                folder = ""
+        path = self.summary.export(folder=folder, heading=heading)
+        if path:
+            self.log(f"Summary report: {path}", "report")
 
     # ------------------------------------------------------------------ #
     def _process_main_queue(self):
@@ -182,6 +208,15 @@ class AutomationWorker(threading.Thread):
             if harm_level == SERIOUS_LABEL:
                 self.log(f"[Warning] ID: {record_id} flagged as SERIOUS", "warn")
                 self.counts["blocked"] += 1
+                # Listed in the summary for awareness only. The record is
+                # never opened, so no patient ID can be read from it.
+                self.summary.add(
+                    record_id=record_id,
+                    outcome="Serious - not opened",
+                    event_code=(self.rules.extract_event_code(record.get("event_description", ""))
+                                if self.rules is not None else ""),
+                    details="Serious harm level. Must be handled manually.",
+                )
                 self.push_status()
                 continue  # still on the dashboard -- no re-navigation needed
 
@@ -250,7 +285,11 @@ class AutomationWorker(threading.Thread):
 
     def _process_single_record(self, record):
         record_id = record["record_id"] or "UNKNOWN"
+        self._current_patient_id = ""
         self.browser.open_record(record["row"])
+
+        # Informational only, for the end-of-run summary. Never raises.
+        self._current_patient_id = self.browser.read_patient_id()
 
         raw_code_text = self.browser.read_event_code_text()
         event_code = self.rules.extract_event_code(raw_code_text)
@@ -293,6 +332,15 @@ class AutomationWorker(threading.Thread):
 
         self.browser.click_save()
         self.counts["processed"] += 1
+        self.summary.add(
+            record_id=record_id,
+            outcome="Saved",
+            patient_id=self._current_patient_id,
+            event_code=matched_rule.event_code,
+            define_text=define_text,
+            causes=causes,
+            details=f"Rule {matched_rule.rule_id}; matched: {matched_rule.matched_keywords}",
+        )
         self.push_status()
         self.log(
             f"[Saved] ID: {record_id} ({matched_rule.event_code} / {matched_rule.rule_id}, "
@@ -380,6 +428,15 @@ class AutomationWorker(threading.Thread):
 
         if answer is None or answer.get("action") == "skip":
             self.log(f"[Test Mode] ID: {record_id}: skipped, not saved.", "warn")
+            self.summary.add(
+                record_id=record_id,
+                outcome="Not saved (you skipped it)",
+                patient_id=self._current_patient_id,
+                event_code=matched_rule.event_code,
+                define_text=define_text,
+                causes=causes,
+                details="Test Mode: you chose not to save this record.",
+            )
             return
 
         # Re-apply in case the user edited the text in the review dialog
@@ -389,6 +446,15 @@ class AutomationWorker(threading.Thread):
 
         self.browser.click_save()
         self.counts["processed"] += 1
+        self.summary.add(
+            record_id=record_id,
+            outcome="Saved",
+            patient_id=self._current_patient_id,
+            event_code=matched_rule.event_code,
+            define_text=final_define,
+            causes=final_causes,
+            details=f"Test Mode: approved by you. Rule {matched_rule.rule_id}.",
+        )
         self.push_status()
         self.log(
             f"[Test Mode - Saved] ID: {record_id} ({matched_rule.event_code}): "
@@ -409,6 +475,13 @@ class AutomationWorker(threading.Thread):
         )
         self.deferred.add(record_id, event_code, free_text, reason="no_match")
         self.counts["deferred"] += 1
+        self.summary.add(
+            record_id=record_id,
+            outcome="Deferred - needs manual review",
+            patient_id=self._current_patient_id,
+            event_code=event_code,
+            details="No keyword match; nothing was saved. See deferred_queue.json.",
+        )
         self.push_status()
 
     # ------------------------------------------------------------------ #

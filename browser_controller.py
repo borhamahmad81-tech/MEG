@@ -402,6 +402,34 @@ class BrowserController:
             return data_value.strip()
         return self.safe_text(el) or el.get_attribute("value") or ""
 
+    def read_patient_id(self) -> str:
+        """Read the 'Patient ID / EMR / Teammate or visitor initials' value.
+
+        Same read-only <span data-value=...> widget as the free-text
+        description, and it lives in the 'Patient information' section which
+        may be collapsed -- so data-value is the only reliable source.
+
+        Purely informational (used for the end-of-run summary), so a failure
+        here must never interrupt processing: returns "" instead of raising.
+        """
+        try:
+            el = self.find("patient_id_field", timeout=5)
+        except Exception:
+            self.logger(
+                "Patient ID field not found on this record -- the summary will "
+                "show no patient for it.",
+                "warn",
+            )
+            return ""
+        try:
+            data_value = el.get_attribute("data-value")
+            if data_value and data_value.strip():
+                return data_value.strip()
+            return (self.safe_text(el) or el.get_attribute("value") or "").strip()
+        except Exception as exc:
+            self.logger(f"Could not read the Patient ID: {exc}", "warn")
+            return ""
+
     def fill_define_problem(self, text: str):
         self._fill_field("define_problem_field", text)
 
