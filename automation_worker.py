@@ -120,6 +120,7 @@ class AutomationWorker(threading.Thread):
 
         if self._stop_event.is_set():
             self.log("Stopped by user before completion.", "warn")
+            self._final_report("Stopped early by user")
             return
 
         if self._single_test_stop:
