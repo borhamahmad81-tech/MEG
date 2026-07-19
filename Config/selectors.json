@@ -45,6 +45,11 @@
     "value": "id_detailed_aor_description",
     "_status": "CONFIRMED - read-only <span data-value=...> even on open records; only read, never filled"
   },
+  "patient_id_field": {
+    "type": "id",
+    "value": "id_patient_teammate_visitor_id",
+    "_status": "CONFIRMED against a real saved record page (2026-07-19). Label: 'Patient ID / EMR / Teammate or visitor initials', inside the 'Patient information' section. It is a read-only <span data-value=...> (same widget type as id_detailed_aor_description), so it MUST be read via the data-value attribute -- .text returns empty whenever that accordion section is collapsed. Read only, never filled."
+  },
   "harm_level_field": {
     "type": "id",
     "value": "id_min_level_of_harm",
